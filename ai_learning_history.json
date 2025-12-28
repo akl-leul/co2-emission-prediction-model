@@ -429,5 +429,71 @@
     "auto_emission_factor": 5.0,
     "emissions_1yr": 188.85670731707316,
     "emissions_2yr": 610.6036585365855
+  },
+  {
+    "timestamp": "2025-12-28T23:11:37.332683",
+    "n_samples": 4,
+    "n_raw_rows": 4,
+    "slope_a": 0.15719999999999998,
+    "intercept_b": -0.19899999999999995,
+    "r2_score": 0.8820490855356149,
+    "auto_emission_factor": 5.0,
+    "emissions_1yr": 1010.9319999999998,
+    "emissions_2yr": 4147.208
+  },
+  {
+    "timestamp": "2025-12-28T23:12:16.181008",
+    "n_samples": 41,
+    "n_raw_rows": 41,
+    "slope_a": 4.921602787456447e-05,
+    "intercept_b": 0.0007957317073170732,
+    "r2_score": 0.026902857277698033,
+    "auto_emission_factor": 5.0,
+    "emissions_1yr": 0.5395905923344949,
+    "emissions_2yr": 1.7445818815331016
+  },
+  {
+    "timestamp": "2025-12-28T23:12:25.733316",
+    "n_samples": 41,
+    "n_raw_rows": 41,
+    "slope_a": 4.921602787456447e-05,
+    "intercept_b": 0.0007957317073170732,
+    "r2_score": 0.026902857277698033,
+    "auto_emission_factor": 5.0,
+    "emissions_1yr": 0.5395905923344949,
+    "emissions_2yr": 1.7445818815331016
+  },
+  {
+    "timestamp": "2025-12-28T23:12:34.890129",
+    "n_samples": 41,
+    "n_raw_rows": 41,
+    "slope_a": 0.01722560975609757,
+    "intercept_b": 0.27850609756097533,
+    "r2_score": 0.026902857277697922,
+    "auto_emission_factor": 5.0,
+    "emissions_1yr": 188.85670731707316,
+    "emissions_2yr": 610.6036585365855
+  },
+  {
+    "timestamp": "2025-12-28T23:16:52.629206",
+    "n_samples": 41,
+    "n_raw_rows": 41,
+    "slope_a": 0.01722560975609757,
+    "intercept_b": 0.27850609756097533,
+    "r2_score": 0.026902857277697922,
+    "auto_emission_factor": 2.93,
+    "emissions_1yr": 110.67003048780487,
+    "emissions_2yr": 357.81374390243906
+  },
+  {
+    "timestamp": "2025-12-28T23:17:19.032762",
+    "n_samples": 4,
+    "n_raw_rows": 4,
+    "slope_a": 0.15719999999999998,
+    "intercept_b": -0.19899999999999995,
+    "r2_score": 0.8820490855356149,
+    "auto_emission_factor": 2.93,
+    "emissions_1yr": 592.406152,
+    "emissions_2yr": 2430.2638879999995
   }
 ]

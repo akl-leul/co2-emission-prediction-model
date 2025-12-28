@@ -130,8 +130,8 @@ class LearningAI:
         """🆕 Save ALL table rows + complete data - JSON SAFE"""
         
         # Convert dataframes to JSON-serializable format
-        raw_serializable = raw_df.reset_index(drop=True).applymap(convert_to_json_serializable).to_dict('records')
-        processed_serializable = processed_df.reset_index(drop=True).applymap(convert_to_json_serializable).to_dict('records')
+        raw_serializable = raw_df.reset_index(drop=True).map(convert_to_json_serializable).to_dict('records')
+        processed_serializable = processed_df.reset_index(drop=True).map(convert_to_json_serializable).to_dict('records')
         
         # Summary entry
         summary_entry = {
@@ -184,19 +184,158 @@ ai_brain = LearningAI()
 # --------------------------------------------------
 # Page configuration
 # --------------------------------------------------
-st.set_page_config(page_title="Charcoal CO₂ Emissions Predictor", layout="wide")
+st.set_page_config(
+    page_title="CO2 Emission from charcoal in Addis Ababa",
+    page_icon="🌿",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-st.title("🧠 AI Learns RAW Data + Auto-Calculates Emission Factor")
-st.markdown("**Saves every row + predictions + learns optimal CO₂ factor**")
+# 🎨 CUSTOM CSS - PREMIUM ECO THEME
+st.markdown("""
+    <style>
+    /* Import Font */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+    
+    html, body, [class*="css"] {
+        font-family: 'Inter', sans-serif;
+    }
 
-# Sidebar - Enhanced
+    /* Main Background & Gradient Header */
+    .stApp {
+        background-color: #0E1117;
+    }
+    
+    h1, h2, h3 {
+        color: #FFFFFF !important;
+        font-weight: 800 !important;
+    }
+    
+    /* Metrics Cards */
+    [data-testid="stMetricValue"] {
+        font-size: 1.8rem !important;
+        color: #00CC96 !important;
+    }
+    [data-testid="stMetricLabel"] {
+        font-size: 1rem !important;
+        color: #A0AEC0 !important;
+    }
+    div[data-testid="stMetric"] {
+        background-color: #1A202C;
+        border: 1px solid #2D3748;
+        padding: 15px;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        transition: transform 0.2s;
+    }
+    div[data-testid="stMetric"]:hover {
+        transform: translateY(-2px);
+        border-color: #00CC96;
+    }
+
+    /* Tabs Styling */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        width: 100%;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        white-space: pre-wrap;
+        background-color: #1A202C;
+        border-radius: 8px 8px 0 0;
+        color: #CBD5E0;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        flex-grow: 1; /* Force tabs to fill width */
+        text-align: center; /* Center text */
+        justify-content: center;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #00CC96 !important;
+        color: #FFFFFF !important;
+    }
+
+    /* Buttons */
+    div.stButton > button {
+        background: linear-gradient(90deg, #00CC96 0%, #2E8B57 100%);
+        color: white;
+        border: none;
+        padding: 12px 24px;
+        border-radius: 8px;
+        font-weight: 600;
+        transition: all 0.3s ease;
+        width: 100%; /* Full width buttons */
+    }
+    div.stButton > button:hover {
+        box-shadow: 0 10px 15px -3px rgba(46, 139, 87, 0.5);
+        color: #FFFFFF;
+        transform: scale(1.02);
+    }
+    
+    /* Sidebar */
+    [data-testid="stSidebar"] {
+        background-color: #111827;
+        border-right: 1px solid #2D3748;
+    }
+    
+    /* File Uploader */
+    [data-testid="stFileUploader"] {
+        width: 100%;
+    }
+    [data-testid="stFileUploader"] section {
+        padding: 3rem !important;
+        background-color: #1A202C !important;
+        border: 2px dashed #00CC96 !important;
+        border-radius: 12px !important;
+        min-height: 200px !important; /* Taller drop area */
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    [data-testid="stFileUploader"] section > input {
+        min-height: 200px !important;
+    }
+    /* Hide the 'Limit 200MB' text if needed, or style it */
+    [data-testid="stFileUploader"] .stMarkdown small {
+        color: #A0AEC0 !important;
+        font-size: 0.9em;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# 🏞️ HERO SECTION
+col1, col2 = st.columns([3, 1])
+with col1:
+    st.title("🌿 CO2 Emission from charcoal in Addis Ababa")
+    st.markdown("### Intelligent Emissions Modeling for Ethiopia")
+    st.markdown("""
+    This system uses **AI** to learn consumption patterns in **Addis Ababa** households.
+    It self-calibrates using local *Ground Truth* data to quantify environmental impact.
+    """)
+with col2:
+    # Just a placeholder visual metric or logo if needed
+    st.metric("Addis Avg Factor", f"2.93", "kgCO₂/kg")
+
+st.markdown("---")
+
+# Sidebar - Enhanced Profile
 with st.sidebar:
-    st.header("🧠 AI Learning")
-    st.metric("📚 Datasets Learned", len(ai_brain.history))
-    st.metric("📋 Full Tables Saved", len(ai_brain.full_data_history))
-    if ai_brain.history:
-        current_factor = ai_brain.calculate_optimal_emission_factor()
-        st.metric("🔬 CO₂ Factor", f"{current_factor:.3f} kg/kg")
+    st.markdown("## 🧠 Neural Engine")
+    
+    # Styled Container for metrics
+    with st.container():
+        st.markdown("### Model Status")
+        st.metric("📚 Datasets Learned", len(ai_brain.history))
+        st.metric("💾 Full Tables DB", len(ai_brain.full_data_history))
+        
+        if ai_brain.history:
+            current_factor = ai_brain.calculate_optimal_emission_factor()
+            delta_color = "normal"
+            if current_factor > 3.0: delta_color = "inverse"
+            st.metric("🔥 Current Factor", f"{current_factor:.3f}", "kg CO₂/kg", delta_color=delta_color)
+
+    st.markdown("---")
+    st.info("💡 **Tip:** Upload files with a 'CO₂' column to auto-calibrate the physics engine.")
 
 # 🆕 TABS
 tab1, tab2 = st.tabs(["📊 Instant Analysis", "🔮 CO₂ Prediction"])
@@ -212,19 +351,38 @@ with tab1:
             st.success(f"✅ Loaded **{len(df_raw)} rows × {len(df_raw.columns)} columns**")
 
             # 🆕 PIE CHARTS FOR ALL COLUMNS
-            st.subheader("🥧 **Instant Analysis - All Columns**")
-            for col_name in df_raw.columns:
-                with st.container():
-                    col1, col2 = st.columns([1, 4])
-                    with col2:
-                        value_counts = df_raw[col_name].value_counts().head(8)
-                        if len(value_counts) > 0:
-                            fig, ax = plt.subplots(figsize=(6, 5))
-                            colors = plt.cm.Set3(np.linspace(0, 1, len(value_counts)))
-                            ax.pie(value_counts.values, labels=value_counts.index, 
-                                   autopct='%1.1f%%', startangle=90, colors=colors)
-                            ax.set_title(f"📊 {col_name}", fontweight='bold')
-                            st.pyplot(fig)
+            st.markdown("### 🥧 column distribution")
+            
+            # Use 3 columns layout for charts
+            chart_cols = st.columns(3)
+            
+            for i, col_name in enumerate(df_raw.columns):
+                with chart_cols[i % 3]:
+                    value_counts = df_raw[col_name].value_counts().head(8)
+                    if len(value_counts) > 0:
+                        # Dark Theme Plot
+                        with plt.style.context("dark_background"):
+                            fig, ax = plt.subplots(figsize=(5, 5))
+                            # Premium Colors (Greens/Teals)
+                            colors = plt.cm.summer(np.linspace(0.2, 0.8, len(value_counts)))
+                            
+                            wedges, texts, autotexts = ax.pie(
+                                value_counts.values, 
+                                labels=value_counts.index, 
+                                autopct='%1.1f%%', 
+                                startangle=90, 
+                                colors=colors,
+                                wedgeprops=dict(width=0.5, edgecolor='#1A202C'), # Donut chart style
+                                textprops={'color': "white", 'fontsize': 9}
+                            )
+                            plt.setp(autotexts, size=8, weight="bold")
+                            ax.set_title(f"{col_name}", fontweight='bold', color='#00CC96', pad=20)
+                            
+                            # Transparent background
+                            fig.patch.set_facecolor('none')
+                            ax.patch.set_facecolor('none')
+                            
+                            st.pyplot(fig, width="stretch")
             
         except Exception as e:
             st.error(f"⚠️ Error: {str(e)}")
@@ -257,7 +415,7 @@ with tab2:
             st.info(f"🤖 **AI Learned Factor: {ai_factor:.3f} kg CO₂/kg charcoal**")
 
             if all(c != "None" for c in [charcoal_col, household_col, freq_col]):
-                if st.button("🚀 **TRAIN AI + SAVE FULL DATA**", type="primary", use_container_width=True):
+                if st.button("🚀 **TRAIN AI + SAVE FULL DATA**", type="primary", width="stretch"):
                     
                     # Process data
                     df_work = df_raw.copy()
@@ -363,26 +521,44 @@ with tab2:
                     st.dataframe(df_processed[['Week', 'Total_Charcoal_kg', 'Predicted_Charcoal', 'Prediction_Error', 'CO2_kg']].head(10).round(2))
 
                     st.subheader("🌍 5-Year CO₂ Forecast")
-                    fig, ax = plt.subplots(figsize=(12, 8))
-                    max_weeks = 260
-                    weeks_long = np.linspace(0, max_weeks, 200)
-                    cum_long = np.array([total_emissions(t, a, b, optimal_factor) for t in weeks_long])
                     
-                    ax.plot(weeks_long/52, cum_long/1000, linewidth=4, color='darkgreen', label='Total CO₂')
-                    ax.fill_between(weeks_long/52, cum_long/1000, alpha=0.3, color='green')
-                    
-                    years = [1, 2, 3, 4, 5]
-                    for year in years:
-                        emissions_tons = total_emissions(year*52, a, b, optimal_factor) / 1000
-                        ax.axvline(x=year, linestyle='--', alpha=0.7, linewidth=2, color='red')
-                        ax.plot(year, emissions_tons, 'o', markersize=12, color='red')
-                        ax.annotate(f'{year}Y\n{emissions_tons:.0f}t', (year, emissions_tons), 
-                                   xytext=(5, 5), textcoords='offset points')
-                    
-                    ax.set_xlabel("Years"); ax.set_ylabel("CO₂ (metric tons)")
-                    ax.set_title(f"5-Year Forecast (CO₂ Factor: {optimal_factor:.3f})")
-                    ax.legend(); ax.grid(True, alpha=0.3)
-                    st.pyplot(fig)
+                    with plt.style.context("dark_background"):
+                        fig, ax = plt.subplots(figsize=(12, 6))
+                        # Dark canvas
+                        fig.patch.set_facecolor('#0E1117')
+                        ax.set_facecolor('#0E1117')
+                        
+                        max_weeks = 260
+                        weeks_long = np.linspace(0, max_weeks, 200)
+                        cum_long = np.array([total_emissions(t, a, b, optimal_factor) for t in weeks_long])
+                        
+                        # Plot Line with Neon Glow effect
+                        ax.plot(weeks_long/52, cum_long/1000, linewidth=3, color='#00CC96', label='Cumulative CO₂')
+                        ax.fill_between(weeks_long/52, cum_long/1000, alpha=0.1, color='#00CC96')
+                        
+                        # Milestones
+                        years = [1, 2, 3, 4, 5]
+                        for year in years:
+                            emissions_tons = total_emissions(year*52, a, b, optimal_factor) / 1000
+                            # Vertical dashed lines
+                            ax.axvline(x=year, linestyle=':', alpha=0.5, linewidth=1, color='gray')
+                            # Points
+                            ax.plot(year, emissions_tons, 'o', markersize=8, color='#FFFFFF', markeredgecolor='#00CC96', markeredgewidth=2)
+                            # Annotations
+                            ax.annotate(f'{emissions_tons:.1f}t', (year, emissions_tons), 
+                                       xytext=(0, 10), textcoords='offset points', 
+                                       ha='center', color='white', fontweight='bold', fontsize=9)
+                        
+                        # Styling
+                        ax.set_xlabel("Years into Future", color='gray')
+                        ax.set_ylabel("Metric Tons CO₂", color='gray')
+                        ax.spines['top'].set_visible(False)
+                        ax.spines['right'].set_visible(False)
+                        ax.spines['left'].set_color('#2D3748')
+                        ax.spines['bottom'].set_color('#2D3748')
+                        ax.grid(color='#2D3748', linestyle='--', linewidth=0.5, alpha=0.5)
+                        
+                        st.pyplot(fig, width="stretch")
 
         except Exception as e:
             st.error(f"⚠️ Error: {str(e)}")
