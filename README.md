@@ -219,5 +219,6 @@ To support CSV or JSON upload:
 ## 8. License & Usage
 This code is open-source.
 -   **License**: MIT
--   **Author**: Antigravity AI
+-   **Author**: Leul Ayfokru
 -   **Date**: December 2025
+
