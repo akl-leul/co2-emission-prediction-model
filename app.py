@@ -7,10 +7,23 @@ import pandas as pd
 import streamlit as st
 from scipy.integrate import quad
 from sklearn.linear_model import LinearRegression
+from supabase import create_client, Client
 
 # 🧠 ENHANCED SELF-LEARNING SYSTEM - SAVES FULL TABLES
 LEARNING_FILE = "ai_learning_history.json"
 FULL_DATA_FILE = "ai_full_data_history.json"
+
+# 🗄️ SUPABASE CONFIGURATION
+SUPABASE_URL = st.secrets.supabase.url
+SUPABASE_KEY = st.secrets.supabase.key
+
+def get_supabase_client() -> Client:
+    """Initialize and return Supabase client"""
+    try:
+        return create_client(SUPABASE_URL, SUPABASE_KEY)
+    except Exception as e:
+        st.error(f"Failed to connect to Supabase: {e}")
+        return None
 
 # --------------------------------------------------
 # EMISSIONS MODEL WITH AUTO-CALCULATED EMISSION_FACTOR
@@ -68,11 +81,22 @@ def convert_to_json_serializable(obj):
     if isinstance(obj, np.integer):
         return int(obj)
     if isinstance(obj, np.floating):
+        # Handle NaN values
+        if np.isnan(obj):
+            return None
         return float(obj)
     if isinstance(obj, (np.floating, np.float64)):
+        # Handle NaN values
+        if np.isnan(obj):
+            return None
         return float(obj)
     if isinstance(obj, np.ndarray):
         return obj.tolist()
+    if isinstance(obj, float):
+        # Handle NaN values for regular Python floats
+        if np.isnan(obj):
+            return None
+        return obj
     return obj
 
 def parse_charcoal(val):
@@ -85,24 +109,51 @@ class LearningAI:
     def __init__(self):
         self.history = []
         self.full_data_history = []
+        self.supabase = get_supabase_client()
         self.load_history()
         self.load_full_data()
 
     def load_history(self):
-        if os.path.exists(LEARNING_FILE):
+        """Load history from Supabase, fallback to local file if needed"""
+        if self.supabase:
             try:
-                with open(LEARNING_FILE, "r") as f:
-                    self.history = json.load(f)
-            except:
+                response = self.supabase.table("emission_summaries").select("*").order("timestamp", desc=True).execute()
+                if response.data:
+                    self.history = response.data
+                else:
+                    self.history = []
+            except Exception as e:
+                st.warning(f"Failed to load history from Supabase: {e}")
                 self.history = []
+        else:
+            # Fallback to local file if Supabase is not available
+            if os.path.exists(LEARNING_FILE):
+                try:
+                    with open(LEARNING_FILE, "r") as f:
+                        self.history = json.load(f)
+                except:
+                    self.history = []
 
     def load_full_data(self):
-        if os.path.exists(FULL_DATA_FILE):
+        """Load full data from Supabase, fallback to local file if needed"""
+        if self.supabase:
             try:
-                with open(FULL_DATA_FILE, "r") as f:
-                    self.full_data_history = json.load(f)
-            except:
+                response = self.supabase.table("emission_datasets").select("*").order("timestamp", desc=True).execute()
+                if response.data:
+                    self.full_data_history = response.data
+                else:
+                    self.full_data_history = []
+            except Exception as e:
+                st.warning(f"Failed to load full data from Supabase: {e}")
                 self.full_data_history = []
+        else:
+            # Fallback to local file if Supabase is not available
+            if os.path.exists(FULL_DATA_FILE):
+                try:
+                    with open(FULL_DATA_FILE, "r") as f:
+                        self.full_data_history = json.load(f)
+                except:
+                    self.full_data_history = []
 
     def calculate_optimal_emission_factor(self):
         """
@@ -154,13 +205,13 @@ class LearningAI:
         return 2.93
 
     def save_full_dataset(self, raw_df, processed_df, a, b, r2, predictions, emission_factor, is_ground_truth=False):
-        """🆕 Save ALL table rows + complete data - JSON SAFE"""
+        """🆕 Save ALL table rows + complete data to Supabase and local files"""
         
         # Convert dataframes to JSON-serializable format
         raw_serializable = raw_df.reset_index(drop=True).map(convert_to_json_serializable).to_dict('records')
         processed_serializable = processed_df.reset_index(drop=True).map(convert_to_json_serializable).to_dict('records')
         
-        # Summary entry
+        # Summary entry for local history
         summary_entry = {
             "timestamp": datetime.now().isoformat(),
             "n_samples": len(processed_df),
@@ -199,7 +250,79 @@ class LearningAI:
         }
         self.full_data_history.append(full_entry)
         
-        # Save files - KEEP LAST 20 FULL DATASETS
+        # 🗄️ SAVE TO SUPABASE
+        if self.supabase:
+            try:
+                # Save summary to emission_summaries table
+                summary_data = {
+                    "timestamp": datetime.now().isoformat(),
+                    "n_samples": len(processed_df),
+                    "n_raw_rows": len(raw_df),
+                    "slope_a": float(a),
+                    "intercept_b": float(b),
+                    "r2_score": float(r2),
+                    "auto_emission_factor": float(emission_factor),
+                    "emissions_1yr": float(total_emissions(52, a, b, emission_factor)),
+                    "emissions_2yr": float(total_emissions(104, a, b, emission_factor))
+                }
+                self.supabase.table("emission_summaries").insert(summary_data).execute()
+                
+                # Save full dataset to emission_datasets table
+                dataset_data = {
+                    "timestamp": datetime.now().isoformat(),
+                    "source_file": full_entry["source_file"],
+                    "n_raw_rows": len(raw_df),
+                    "n_processed_rows": len(processed_df),
+                    "model_params": full_entry["model_params"],
+                    "is_ground_truth": is_ground_truth,
+                    "raw_data_table": raw_serializable,
+                    "processed_data_table": processed_serializable,
+                    "predictions_list": predictions.tolist(),
+                    "forecasts": full_entry["forecasts"]
+                }
+                dataset_response = self.supabase.table("emission_datasets").insert(dataset_data).execute()
+                
+                # Save individual records to emission_records table
+                if dataset_response.data:
+                    dataset_id = dataset_response.data[0]["id"]
+                    records = []
+                    for idx, row in processed_df.iterrows():
+                        def safe_float(value):
+                            """Convert to float, handling NaN values"""
+                            try:
+                                val = float(value)
+                                return None if np.isnan(val) else val
+                            except (ValueError, TypeError):
+                                return 0.0
+                        
+                        record = {
+                            "dataset_id": dataset_id,
+                            "week": int(row.get("Week", idx + 1)),
+                            "total_charcoal_kg": safe_float(row.get("Total_Charcoal_kg", 0)),
+                            "predicted_charcoal": safe_float(row.get("Predicted_Charcoal", 0)),
+                            "prediction_error": safe_float(row.get("Prediction_Error", 0)),
+                            "co2_kg": safe_float(row.get("CO2_kg", 0)),
+                            "households": int(row.get("Households", 1)),
+                            "avg_charcoal_kg": safe_float(row.get("Avg_Charcoal_kg", 0)),
+                            "frequency_per_week": safe_float(row.get("Frequency_per_week", 1)),
+                            "charcoal_per_use_kg": safe_float(row.get("Charcoal_per_use_kg", 0)),
+                            "household_size": safe_float(row.get("Household_Size", 1))
+                        }
+                        records.append(record)
+                    
+                    # Insert records in batches to avoid size limits
+                    batch_size = 100
+                    for i in range(0, len(records), batch_size):
+                        batch = records[i:i + batch_size]
+                        self.supabase.table("emission_records").insert(batch).execute()
+                
+                st.success("✅ Data successfully saved to Supabase!")
+                
+            except Exception as e:
+                st.error(f"❌ Failed to save to Supabase: {e}")
+                st.info("💾 Data saved locally as fallback")
+        
+        # Save local files - KEEP LAST 20 FULL DATASETS
         with open(LEARNING_FILE, "w") as f:
             json.dump(self.history[-100:], f, indent=2)
         
@@ -218,7 +341,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 🎨 CUSTOM CSS - PREMIUM ECO THEME
+# � CUSTOM CSS - PREMIUM ECO THEME
 st.markdown("""
     <style>
     /* Import Font */
