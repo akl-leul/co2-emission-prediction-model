@@ -8,6 +8,10 @@ import streamlit as st
 from scipy.integrate import quad
 from sklearn.linear_model import LinearRegression
 
+# 🧠 ENHANCED SELF-LEARNING SYSTEM - SAVES FULL TABLES
+LEARNING_FILE = "ai_learning_history.json"
+FULL_DATA_FILE = "ai_full_data_history.json"
+
 # --------------------------------------------------
 # EMISSIONS MODEL WITH AUTO-CALCULATED EMISSION_FACTOR
 # --------------------------------------------------
@@ -23,11 +27,32 @@ def prepare_data(df, emission_factor):
     return df
 
 def fit_consumption_model(df):
-    X = df["Week"].values.reshape(-1, 1)
-    y = df["Total_Charcoal_kg"].values
-    model = LinearRegression()
-    model.fit(X, y)
-    return model.coef_[0], model.intercept_, model
+    # Ensure required columns exist
+    required_columns = ["Week", "Total_Charcoal_kg"]
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    if missing_columns:
+        raise ValueError(f"Missing required columns: {', '.join(missing_columns)}")
+    
+    # Create a clean copy of the data
+    df_clean = df[required_columns].dropna()
+    
+    # Check if we have enough data points
+    if len(df_clean) < 2:
+        raise ValueError("Insufficient data points for linear regression. Need at least 2 valid data points.")
+    
+    X = df_clean["Week"].values.reshape(-1, 1)
+    y = df_clean["Total_Charcoal_kg"].values
+    
+    # Check for NaN in the target variable
+    if np.isnan(y).any():
+        raise ValueError("Target variable contains NaN values after cleaning. Please check your input data.")
+    
+    try:
+        model = LinearRegression()
+        model.fit(X, y)
+        return model.coef_[0], model.intercept_, model
+    except Exception as e:
+        raise ValueError(f"Error fitting linear regression model: {str(e)}")
 
 def emission_rate(t, a, b, emission_factor):
     return emission_factor * (a * t + b)
@@ -38,21 +63,23 @@ def total_emissions(T, a, b, emission_factor):
 
 def convert_to_json_serializable(obj):
     """Convert pandas Timestamp and other non-JSON types to strings"""
-    if isinstance(obj, pd.Timestamp):
+    if isinstance(obj, (datetime, pd.Timestamp)):
         return obj.isoformat()
-    if pd.isna(obj):
-        return None
-    if isinstance(obj, (np.integer, np.int64)):
+    if isinstance(obj, np.integer):
         return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
     if isinstance(obj, (np.floating, np.float64)):
         return float(obj)
     if isinstance(obj, np.ndarray):
         return obj.tolist()
     return obj
 
-# 🧠 ENHANCED SELF-LEARNING SYSTEM - SAVES FULL TABLES
-LEARNING_FILE = "ai_learning_history.json"
-FULL_DATA_FILE = "ai_full_data_history.json"
+def parse_charcoal(val):
+    try:
+        return float(str(val).replace("bags", "").replace("bag", "").replace(",", ".").strip())
+    except: 
+        return 0.0
 
 class LearningAI:
     def __init__(self):
@@ -150,7 +177,7 @@ class LearningAI:
         # 🆕 FULL DATA: ALL RAW ROWS + ALL PROCESSED ROWS + PREDICTIONS
         full_entry = {
             "timestamp": datetime.now().isoformat(),
-            "source_file": "Excel Upload",
+            "source_file": "Multiple Files Upload" if len(processed_df) > 0 else "Excel Upload",
             "n_raw_rows": len(raw_df),
             "n_processed_rows": len(processed_df),
             "model_params": {
@@ -341,14 +368,22 @@ with st.sidebar:
 tab1, tab2 = st.tabs(["📊 Instant Analysis", "🔮 CO₂ Prediction"])
 
 with tab1:
-    st.subheader("📁 Upload Excel File")
-    uploaded_file1 = st.file_uploader("Choose Excel (.xlsx)", type=["xlsx"], key="analysis")
+    st.subheader("📁 Upload Excel File(s)")
+    uploaded_files1 = st.file_uploader("Choose Excel (.xlsx)", type=["xlsx"], key="analysis", accept_multiple_files=True)
 
-    if uploaded_file1:
+    if uploaded_files1:
         try:
-            df_raw = pd.read_excel(uploaded_file1)
+            # Combine all files
+            df_list = []
+            for file in uploaded_files1:
+                df_temp = pd.read_excel(file)
+                df_list.append(df_temp)
+            
+            df_raw = pd.concat(df_list, ignore_index=True)
             df_raw.columns = df_raw.columns.str.strip()
-            st.success(f"✅ Loaded **{len(df_raw)} rows × {len(df_raw.columns)} columns**")
+            
+            file_count = len(uploaded_files1)
+            st.success(f"✅ Loaded **{len(df_raw)} rows** from **{file_count} file{'s' if file_count > 1 else ''}** (Columns: {len(df_raw.columns)})")
 
             # 🆕 PIE CHARTS FOR ALL COLUMNS
             st.markdown("### 🥧 column distribution")
@@ -388,28 +423,110 @@ with tab1:
             st.error(f"⚠️ Error: {str(e)}")
 
 with tab2:
-    st.subheader("📁 Upload Excel File")
-    uploaded_file2 = st.file_uploader("Choose Excel (.xlsx)", type=["xlsx"], key="predict")
+    st.subheader(" Upload Excel File(s)")
+    uploaded_files2 = st.file_uploader("Choose Excel (.xlsx)", type=["xlsx"], key="predict", accept_multiple_files=True)
 
-    if uploaded_file2:
+    if uploaded_files2:
         try:
-            df_raw = pd.read_excel(uploaded_file2)
-            df_raw.columns = df_raw.columns.str.strip()
-            st.success(f"✅ Loaded **{len(df_raw)} rows × {len(df_raw.columns)} columns**")
-
-            # Column mapping
-            st.subheader("🔧 **CO₂ Model Setup**")
-            col_options = ["None"] + list(df_raw.columns)
+            # First, let's get the column mappings
+            st.subheader("")
+            # Read the first file and strip whitespace from column names
+            df_sample = pd.read_excel(uploaded_files2[0])
+            df_sample.columns = df_sample.columns.str.strip()
+            col_options = ["None"] + list(df_sample.columns)
+            
+            # Smart defaults based on new survey questions
+            default_charcoal = "None"
+            default_household = "None"
+            default_freq = "None"
+            
+            for col in col_options[1:]:  # Skip "None" option
+                c_lower = col.lower().strip()
+                if "how much charcoal" in c_lower: default_charcoal = col
+                elif "charcoal" in c_lower and default_charcoal == "None": default_charcoal = col
+                
+                if "households" in c_lower: default_household = col
+                elif "household" in c_lower and default_household == "None": default_household = col
+                
+                if "often do" in c_lower and "use charcoal" in c_lower: default_freq = col
+                elif "frequency" in c_lower and default_freq == "None": default_freq = col
+            
+            # Get column selections
             col1, col2, col3 = st.columns(3)
-            with col1: charcoal_col = st.selectbox("🥫 Charcoal", col_options)
-            with col2: household_col = st.selectbox("👨‍👩‍👧‍👦 Households", col_options)
-            with col3: freq_col = st.selectbox("📅 Frequency", col_options)
+            with col1: 
+                charcoal_index = col_options.index(default_charcoal)
+                charcoal_col = st.selectbox(" Charcoal Amount", col_options, index=charcoal_index)
+            with col2: 
+                household_index = col_options.index(default_household)
+                household_col = st.selectbox(" Households", col_options, index=household_index)
+            with col3: 
+                freq_index = col_options.index(default_freq)
+                freq_col = st.selectbox(" Frequency / Usage", col_options, index=freq_index)
             
             # Additional optional column for Ground Truth
-            co2_gt_col = st.selectbox("🧪 CO₂ Ground Truth (Optional)", ["None"] + list(df_raw.columns), 
+            co2_gt_col = st.selectbox(" CO₂ Ground Truth (Optional)", ["None"] + col_options[1:], 
                                       help="If you have actual CO₂ measurements, select this to calibrate the AI.")
+            
+            # Process each file with its own unit selection
+            processed_dfs = []
+            
+            for file in uploaded_files2:
+                with st.expander(f" {file.name}"):
+                    # Read the file
+                    df_temp = pd.read_excel(file)
+                    df_temp.columns = df_temp.columns.str.strip()
+                    
+                    # Let user select unit for this file
+                    file_charcoal_unit = st.radio(
+                        " Unit for this file",
+                        ["bags (350g)", "grams"],
+                        key=f"unit_{file.name}",
+                        index=0
+                    )
+                    
+                    # Store the processed dataframe with its unit
+                    processed_dfs.append({
+                        'df': df_temp,
+                        'unit': file_charcoal_unit,
+                        'name': file.name
+                    })
+            
+            # Now process each file with its selected unit
+            final_dfs = []
+            for item in processed_dfs:
+                df_temp = item['df']
+                file_charcoal_unit = item['unit']
+                
+                # Process the dataframe with its specific unit
+                df_work = df_temp.copy()
+                # Clean column names by stripping whitespace
+                df_work.columns = df_work.columns.str.strip()
+                # First create the column with the original data
+                df_work["Charcoal_per_use"] = df_work[charcoal_col.strip()].copy()
+                df_work["Household_Size"] = df_work[household_col.strip()].copy()
+                df_work["Frequency"] = df_work[freq_col.strip()].copy()
+                
+                # Then apply the parsing function
+                df_work["Charcoal_per_use"] = df_work["Charcoal_per_use"].apply(parse_charcoal)
+                
+                if file_charcoal_unit == "bags (350g)":
+                    df_work["Charcoal_per_use_kg"] = df_work["Charcoal_per_use"] * 0.35
+                else:
+                    df_work["Charcoal_per_use_kg"] = df_work["Charcoal_per_use"] / 1000
+                
+                final_dfs.append(df_work)
+            
+            # Combine all processed dataframes
+            if final_dfs:
+                df_raw = pd.concat(final_dfs, ignore_index=True)
+            else:
+                st.error("No valid data to process")
+                st.stop()
+            
+            file_count = len(uploaded_files2)
+            st.success(f" Loaded **{len(df_raw)} rows** from **{file_count} file{'s' if file_count > 1 else ''}** (Columns: {len(df_raw.columns)})")
 
-            charcoal_unit = st.radio("📏 Unit", ["bags (350g)", "grams"], index=0)
+            # Column mapping already done before file processing
 
             ai_factor = ai_brain.calculate_optimal_emission_factor()
             st.info(f"🤖 **AI Learned Factor: {ai_factor:.3f} kg CO₂/kg charcoal**")
@@ -417,28 +534,30 @@ with tab2:
             if all(c != "None" for c in [charcoal_col, household_col, freq_col]):
                 if st.button("🚀 **TRAIN AI + SAVE FULL DATA**", type="primary", width="stretch"):
                     
-                    # Process data
-                    df_work = df_raw.copy()
-                    df_work = df_work.rename(columns={
-                        charcoal_col: "Charcoal_per_use",
-                        household_col: "Household_Size", 
-                        freq_col: "Frequency"
-                    })
+                    # parse_charcoal function is now defined at the top level
+                    # Process data (now handled in the file upload section)
+                    df_work = df_raw.copy()  # Already processed with individual units
 
-                    def parse_charcoal(val):
-                        try:
-                            return float(str(val).replace("bags", "").replace("bag", "").replace(",", ".").strip())
-                        except: return 0.0
+                    # -----------------------------------------------
+                    # SMART FREQUENCY PARSING
+                    # -----------------------------------------------
+                    def parse_frequency(val, col_name):
+                        val_str = str(val).lower()
+                        
+                        # Logic for "How many hours per day..."
+                        if "hours per day" in col_name.lower():
+                            try:
+                                hours = float(val)
+                                if hours > 0: return 7  # Daily use if > 0 hours
+                                return 0
+                            except:
+                                return 0
+                                
+                        # Standard logic
+                        freq_map = {"daily": 7, "once a week": 1, "twice a week": 2, "occasionally": 0.5, "never": 0}
+                        return freq_map.get(val_str, 1) # Default to 1 if unknown text
 
-                    df_work["Charcoal_per_use"] = df_work["Charcoal_per_use"].apply(parse_charcoal)
-                    
-                    if charcoal_unit == "bags (350g)":
-                        df_work["Charcoal_per_use_kg"] = df_work["Charcoal_per_use"] * 0.35
-                    else:
-                        df_work["Charcoal_per_use_kg"] = df_work["Charcoal_per_use"] / 1000
-
-                    freq_map = {"daily": 7, "once a week": 1, "twice a week": 2, "occasionally": 0.5, "never": 0}
-                    df_work["Frequency_per_week"] = df_work["Frequency"].astype(str).str.lower().map(freq_map).fillna(1)
+                    df_work["Frequency_per_week"] = df_work.apply(lambda x: parse_frequency(x["Frequency"], freq_col), axis=1)
                     
                     df_work["Avg_Charcoal_kg"] = df_work["Charcoal_per_use_kg"] * df_work["Frequency_per_week"]
                     df_work["Households"] = pd.to_numeric(df_work["Household_Size"], errors='coerce').fillna(1)
@@ -517,8 +636,8 @@ with tab2:
                     with col3: st.metric("R² Fit", f"{r2:.3f}")
                     with col4: st.metric("CO₂ Factor", f"{optimal_factor:.3f}")
 
-                    st.subheader("📊 Sample Results (First 10 rows)")
-                    st.dataframe(df_processed[['Week', 'Total_Charcoal_kg', 'Predicted_Charcoal', 'Prediction_Error', 'CO2_kg']].head(10).round(2))
+                    st.subheader("📊 All Data Results")
+                    st.dataframe(df_processed[['Week', 'Total_Charcoal_kg', 'Predicted_Charcoal', 'Prediction_Error', 'CO2_kg']].round(2))
 
                     st.subheader("🌍 5-Year CO₂ Forecast")
                     
