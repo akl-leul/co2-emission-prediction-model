@@ -10,7 +10,6 @@ from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import PolynomialFeatures
 from sklearn.pipeline import Pipeline
 from supabase import create_client, Client
-from emission_model import fit_consumption_model, emission_rate, total_emissions, prepare_data
 
 # 🧠 ENHANCED SELF-LEARNING SYSTEM - SAVES FULL TABLES
 LEARNING_FILE = "ai_learning_history.json"
@@ -118,9 +117,128 @@ def generate_frequency_distribution_table(df):
     return freq_tables
 
 # --------------------------------------------------
+# POLYNOMIAL REGRESSION FUNCTIONS (moved from emission_model.py)
+# --------------------------------------------------
+BAG_WEIGHT_GRAMS = 350
+
+def prepare_data(df, emission_factor):
+    """Enhanced with dynamic emission factor"""
+    for col in ["Avg_Charcoal_kg", "Households"]:
+        if col not in df.columns:
+            raise ValueError(f"Required column missing: {col}")
+    df["Total_Charcoal_kg"] = df["Avg_Charcoal_kg"] * df["Households"]
+    df["CO2_kg"] = df["Total_Charcoal_kg"] * emission_factor
+    return df
+
+def fit_consumption_model(df, degree=2):
+    """Fit polynomial regression model for consumption prediction with realistic constraints"""
+    # Ensure required columns exist
+    required_columns = ["Week", "Total_Charcoal_kg"]
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    if missing_columns:
+        raise ValueError(f"Missing required columns: {', '.join(missing_columns)}")
+    
+    # Create a clean copy of data
+    df_clean = df[required_columns].dropna()
+    
+    # Check if we have enough data points
+    min_points = degree + 1
+    if len(df_clean) < min_points:
+        raise ValueError(f"Insufficient data points for polynomial regression of degree {degree}. Need at least {min_points} valid data points.")
+    
+    X = df_clean["Week"].values.reshape(-1, 1)
+    y = df_clean["Total_Charcoal_kg"].values
+    
+    # Check for NaN in target variable
+    if np.isnan(y).any():
+        raise ValueError("Target variable contains NaN values after cleaning. Please check your input data.")
+    
+    # Ensure no negative values in target
+    if (y < 0).any():
+        raise ValueError("Target variable contains negative values. Charcoal consumption cannot be negative.")
+    
+    try:
+        # For consumption data, use a simpler approach that ensures realistic patterns
+        # Try quadratic polynomial first
+        model = Pipeline([
+            ('poly', PolynomialFeatures(degree=2)),
+            ('linear', LinearRegression())
+        ])
+        model.fit(X, y)
+        
+        # Get coefficients and intercept
+        poly_features = model.named_steps['poly']
+        linear_model = model.named_steps['linear']
+        coefficients = linear_model.coef_
+        intercept = linear_model.intercept_
+        
+        # Validate model produces realistic consumption patterns
+        X_test = np.linspace(0, max(X.flatten()) * 1.5, 100).reshape(-1, 1)
+        y_pred = model.predict(X_test)
+        
+        # Check for unrealistic patterns
+        has_negative = (y_pred < 0).any()
+        has_excessive_growth = (y_pred > y.max() * 3).any()  # More than 3x max observed
+        
+        if has_negative or has_excessive_growth:
+            # Fall back to linear regression for more stable predictions
+            linear_model_simple = LinearRegression()
+            linear_model_simple.fit(X, y)
+            return linear_model_simple.coef_, linear_model_simple.intercept_, linear_model_simple
+        
+        # Additional validation: ensure reasonable growth rate
+        # Consumption should not grow exponentially
+        if degree >= 2:
+            # For quadratic: check if the coefficient of t^2 is reasonable
+            if len(coefficients) > 2 and abs(coefficients[2]) > abs(coefficients[1]) * 0.1:
+                linear_model_simple = LinearRegression()
+                linear_model_simple.fit(X, y)
+                return linear_model_simple.coef_, linear_model_simple.intercept_, linear_model_simple
+        
+        # Return coefficients, intercept, and full model
+        return coefficients, intercept, model
+    except Exception as e:
+        raise ValueError(f"Error fitting polynomial regression model: {str(e)}")
+
+def emission_rate(t, coefficients, intercept, emission_factor):
+    """Calculate emission rate at time t using polynomial model"""
+    # Calculate polynomial value at time t
+    poly_value = intercept
+    for i, coeff in enumerate(coefficients[1:], 1):  # Skip the first coefficient (bias term)
+        poly_value += coeff * (t ** i)
+    
+    return emission_factor * poly_value
+
+def total_emissions(T, coefficients, intercept, emission_factor):
+    """Calculate total emissions over time period T using polynomial model with realistic constraints"""
+    # For polynomial integration, we integrate each term separately
+    # ∫(intercept + c1*t + c2*t^2 + ...) dt = intercept*t + c1*t^2/2 + c2*t^3/3 + ...
+    integrated_value = intercept * T  # Start with intercept term
+    
+    # Integrate polynomial terms (skip first coefficient which is for bias)
+    for i, coeff in enumerate(coefficients[1:], 1):  # Skip the first coefficient (bias term)
+        integrated_value += coeff * (T ** (i + 1)) / (i + 1)
+    
+    # Apply emission factor
+    total_emissions = emission_factor * integrated_value
+    
+    # Ensure emissions are realistic and non-negative
+    # For consumption, emissions should generally increase over time
+    realistic_emissions = max(0, total_emissions)
+    
+    # Additional sanity check: emissions shouldn't be excessively high
+    # If it seems unrealistic, cap it at a reasonable multiple of the first year
+    if T > 52:  # For predictions beyond 1 year
+        first_year_emissions = emission_factor * intercept * 52  # Simple baseline
+        max_reasonable = first_year_emissions * (T / 52) * 1.5  # Max 1.5x linear growth
+        realistic_emissions = min(realistic_emissions, max_reasonable)
+    
+    return realistic_emissions
+
+# --------------------------------------------------
 # EMISSIONS MODEL - USING POLYNOMIAL REGRESSION ONLY
 # --------------------------------------------------
-# All model functions are now imported from emission_model.py
+# All model functions are now defined directly in this file
 
 def convert_to_json_serializable(obj):
     """Convert pandas Timestamp and other non-JSON types to strings"""
@@ -619,7 +737,7 @@ with tab1:
                                 st.metric("Categories", len(display_df))
                             
                             # Display the table
-                            st.dataframe(display_df, use_container_width=True)
+                            st.dataframe(display_df, width='stretch')
                             
                             # Simple bar chart
                             with plt.style.context("dark_background"):
