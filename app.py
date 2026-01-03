@@ -7,7 +7,10 @@ import pandas as pd
 import streamlit as st
 from scipy.integrate import quad
 from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.pipeline import Pipeline
 from supabase import create_client, Client
+from emission_model import fit_consumption_model, emission_rate, total_emissions, prepare_data
 
 # 🧠 ENHANCED SELF-LEARNING SYSTEM - SAVES FULL TABLES
 LEARNING_FILE = "ai_learning_history.json"
@@ -25,54 +28,99 @@ def get_supabase_client() -> Client:
         st.error(f"Failed to connect to Supabase: {e}")
         return None
 
+def generate_frequency_distribution_table(df):
+    """Generate frequency distribution table for key variables"""
+    freq_tables = {}
+    
+    # Frequency distribution for key numeric columns - flexible column detection
+    numeric_mappings = {
+        'Total_Charcoal_kg': ['total_charcoal_kg', 'charcoal_kg', 'charcoal', 'charcoal amount', 'how much charcoal'],
+        'CO2_kg': ['co2_kg', 'co2', 'carbon dioxide', 'emissions'],
+        'Avg_Charcoal_kg': ['avg_charcoal_kg', 'average_charcoal', 'charcoal_per_use_kg', 'charcoal per use'],
+        'Frequency_per_week': ['frequency_per_week', 'frequency', 'how often', 'usage frequency']
+    }
+    
+    for target_col, possible_names in numeric_mappings.items():
+        # Find matching column (case-insensitive)
+        matching_col = None
+        for col in df.columns:
+            col_lower = col.lower().strip()
+            if any(name in col_lower for name in possible_names):
+                matching_col = col
+                break
+        
+        if matching_col and matching_col in df.columns:
+            # Create bins for better distribution analysis
+            data = pd.to_numeric(df[matching_col], errors='coerce').dropna()
+            if len(data) > 0:
+                # Calculate appropriate bin size
+                q1, q3 = data.quantile([0.25, 0.75])
+                iqr = q3 - q1
+                bin_width = 2 * iqr / (len(data) ** (1/3)) if iqr > 0 else 1
+                
+                # Create bins
+                min_val = data.min()
+                max_val = data.max()
+                n_bins = min(10, max(5, int((max_val - min_val) / bin_width) + 1))
+                
+                # Create frequency table
+                freq_table = pd.cut(data, bins=n_bins, include_lowest=True).value_counts().sort_index()
+                freq_tables[target_col] = freq_table
+    
+    # Frequency distribution for categorical columns - flexible column detection
+    categorical_mappings = {
+        'Household_Size': ['household_size', 'household size', 'household', 'family size', 'family'],
+        'Charcoal_per_use_kg': ['charcoal_per_use_kg', 'charcoal per use', 'charcoal amount', 'how much charcoal']
+    }
+    
+    for target_col, possible_names in categorical_mappings.items():
+        # Find matching column (case-insensitive)
+        matching_col = None
+        for col in df.columns:
+            col_lower = col.lower().strip()
+            if any(name in col_lower for name in possible_names):
+                matching_col = col
+                break
+        
+        if matching_col and matching_col in df.columns:
+            data = df[matching_col].dropna()
+            if len(data) > 0:
+                # For numeric categorical data, create ranges
+                try:
+                    numeric_data = pd.to_numeric(data, errors='coerce').dropna()
+                    if len(numeric_data) > 0:
+                        data = numeric_data
+                        is_numeric = True
+                    else:
+                        is_numeric = False
+                except:
+                    is_numeric = False
+                
+                if is_numeric:
+                    if target_col == 'Household_Size':
+                        # Household size typically 1-10
+                        bins = [0, 1, 2, 3, 4, 5, 7, 10, float('inf')]
+                        labels = ['1', '2', '3', '4', '5', '6-7', '8-10', '10+']
+                    elif target_col == 'Charcoal_per_use_kg':
+                        # Charcoal per use in kg
+                        bins = [0, 0.1, 0.2, 0.35, 0.5, 0.75, 1.0, float('inf')]
+                        labels = ['<0.1kg', '0.1-0.2kg', '0.2-0.35kg', '0.35-0.5kg', '0.5-0.75kg', '0.75-1kg', '>1kg']
+                    else:
+                        bins = 5
+                        labels = None
+                    
+                    freq_table = pd.cut(data, bins=bins, labels=labels, include_lowest=True).value_counts().sort_index()
+                else:
+                    freq_table = data.value_counts().sort_index()
+                
+                freq_tables[target_col] = freq_table
+    
+    return freq_tables
+
 # --------------------------------------------------
-# EMISSIONS MODEL WITH AUTO-CALCULATED EMISSION_FACTOR
+# EMISSIONS MODEL - USING POLYNOMIAL REGRESSION ONLY
 # --------------------------------------------------
-BAG_WEIGHT_GRAMS = 350
-
-def prepare_data(df, emission_factor):
-    """Enhanced with dynamic emission factor"""
-    for col in ["Avg_Charcoal_kg", "Households"]:
-        if col not in df.columns:
-            raise ValueError(f"Required column missing: {col}")
-    df["Total_Charcoal_kg"] = df["Avg_Charcoal_kg"] * df["Households"]
-    df["CO2_kg"] = df["Total_Charcoal_kg"] * emission_factor
-    return df
-
-def fit_consumption_model(df):
-    # Ensure required columns exist
-    required_columns = ["Week", "Total_Charcoal_kg"]
-    missing_columns = [col for col in required_columns if col not in df.columns]
-    if missing_columns:
-        raise ValueError(f"Missing required columns: {', '.join(missing_columns)}")
-    
-    # Create a clean copy of the data
-    df_clean = df[required_columns].dropna()
-    
-    # Check if we have enough data points
-    if len(df_clean) < 2:
-        raise ValueError("Insufficient data points for linear regression. Need at least 2 valid data points.")
-    
-    X = df_clean["Week"].values.reshape(-1, 1)
-    y = df_clean["Total_Charcoal_kg"].values
-    
-    # Check for NaN in the target variable
-    if np.isnan(y).any():
-        raise ValueError("Target variable contains NaN values after cleaning. Please check your input data.")
-    
-    try:
-        model = LinearRegression()
-        model.fit(X, y)
-        return model.coef_[0], model.intercept_, model
-    except Exception as e:
-        raise ValueError(f"Error fitting linear regression model: {str(e)}")
-
-def emission_rate(t, a, b, emission_factor):
-    return emission_factor * (a * t + b)
-
-def total_emissions(T, a, b, emission_factor):
-    result, _ = quad(emission_rate, 0, T, args=(a, b, emission_factor))
-    return result
+# All model functions are now imported from emission_model.py
 
 def convert_to_json_serializable(obj):
     """Convert pandas Timestamp and other non-JSON types to strings"""
@@ -204,7 +252,7 @@ class LearningAI:
             
         return 2.93
 
-    def save_full_dataset(self, raw_df, processed_df, a, b, r2, predictions, emission_factor, is_ground_truth=False):
+    def save_full_dataset(self, raw_df, processed_df, coefficients, intercept, r2, predictions, emission_factor, is_ground_truth=False):
         """🆕 Save ALL table rows + complete data to Supabase and local files"""
         
         # Convert dataframes to JSON-serializable format
@@ -216,12 +264,12 @@ class LearningAI:
             "timestamp": datetime.now().isoformat(),
             "n_samples": len(processed_df),
             "n_raw_rows": len(raw_df),
-            "slope_a": float(a),
-            "intercept_b": float(b),
+            "slope_a": float(coefficients[0]) if len(coefficients) > 0 else 0.0,
+            "intercept_b": float(intercept),
             "r2_score": float(r2),
             "auto_emission_factor": float(emission_factor),
-            "emissions_1yr": float(total_emissions(52, a, b, emission_factor)),
-            "emissions_2yr": float(total_emissions(104, a, b, emission_factor)),
+            "emissions_1yr": float(total_emissions(52, coefficients, intercept, emission_factor)),
+            "emissions_2yr": float(total_emissions(104, coefficients, intercept, emission_factor)),
         }
         self.history.append(summary_entry)
         
@@ -232,8 +280,8 @@ class LearningAI:
             "n_raw_rows": len(raw_df),
             "n_processed_rows": len(processed_df),
             "model_params": {
-                "slope_a": float(a),
-                "intercept_b": float(b),
+                "slope_a": float(coefficients[0]) if len(coefficients) > 0 else 0.0,
+                "intercept_b": float(intercept),
                 "r2_score": float(r2),
                 "emission_factor": float(emission_factor)
             },
@@ -242,10 +290,10 @@ class LearningAI:
             "processed_data_table": processed_serializable,  # ALL PROCESSED - JSON SAFE
             "predictions_list": predictions.tolist(),  # ALL PREDICTIONS
             "forecasts": {
-                "1yr": float(total_emissions(52, a, b, emission_factor)),
-                "2yr": float(total_emissions(104, a, b, emission_factor)),
-                "3yr": float(total_emissions(156, a, b, emission_factor)),
-                "5yr": float(total_emissions(260, a, b, emission_factor))
+                "1yr": float(total_emissions(52, coefficients, intercept, emission_factor)),
+                "2yr": float(total_emissions(104, coefficients, intercept, emission_factor)),
+                "3yr": float(total_emissions(156, coefficients, intercept, emission_factor)),
+                "5yr": float(total_emissions(260, coefficients, intercept, emission_factor))
             }
         }
         self.full_data_history.append(full_entry)
@@ -258,12 +306,12 @@ class LearningAI:
                     "timestamp": datetime.now().isoformat(),
                     "n_samples": len(processed_df),
                     "n_raw_rows": len(raw_df),
-                    "slope_a": float(a),
-                    "intercept_b": float(b),
+                    "slope_a": float(coefficients[0]) if len(coefficients) > 0 else 0.0,
+                    "intercept_b": float(intercept),
                     "r2_score": float(r2),
                     "auto_emission_factor": float(emission_factor),
-                    "emissions_1yr": float(total_emissions(52, a, b, emission_factor)),
-                    "emissions_2yr": float(total_emissions(104, a, b, emission_factor))
+                    "emissions_1yr": float(total_emissions(52, coefficients, intercept, emission_factor)),
+                    "emissions_2yr": float(total_emissions(104, coefficients, intercept, emission_factor))
                 }
                 self.supabase.table("emission_summaries").insert(summary_data).execute()
                 
@@ -542,6 +590,74 @@ with tab1:
                             
                             st.pyplot(fig, width="stretch")
             
+            # 🆕 FREQUENCY DISTRIBUTION ANALYSIS FOR INSTANT ANALYSIS
+            st.markdown("### 📈 Frequency Distribution Analysis")
+            
+            try:
+                # Create frequency distribution tables for the raw data
+                freq_tables = generate_frequency_distribution_table(df_raw)
+                
+                if freq_tables:
+                    # Create tabs for different frequency tables
+                    freq_tab_names = [f"{col.replace('_', ' ').title()}" for col in freq_tables.keys()]
+                    freq_tabs = st.tabs(freq_tab_names)
+                    
+                    for i, (col_name, freq_table) in enumerate(freq_tables.items()):
+                        with freq_tabs[i]:
+                            # Convert to display format
+                            display_df = freq_table.reset_index()
+                            display_df.columns = ['Range/Value', 'Frequency']
+                            display_df['Percentage'] = (display_df['Frequency'] / display_df['Frequency'].sum() * 100).round(1)
+                            
+                            # Add statistics
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                st.metric("Total Count", display_df['Frequency'].sum())
+                            with col2:
+                                st.metric("Most Frequent", f"{display_df.iloc[display_df['Frequency'].idxmax(), 0]}")
+                            with col3:
+                                st.metric("Categories", len(display_df))
+                            
+                            # Display the table
+                            st.dataframe(display_df, use_container_width=True)
+                            
+                            # Simple bar chart
+                            with plt.style.context("dark_background"):
+                                fig, ax = plt.subplots(figsize=(10, 4))
+                                fig.patch.set_facecolor('#0E1117')
+                                ax.patch.set_facecolor('#0E1117')
+                                
+                                # Create bar chart
+                                bars = ax.bar(range(len(display_df)), display_df['Frequency'], 
+                                            color='#00CC96', alpha=0.8)
+                                
+                                # Customize
+                                ax.set_xlabel(col_name.replace('_', ' ').title(), color='gray')
+                                ax.set_ylabel('Frequency', color='gray')
+                                ax.set_title(f'Distribution of {col_name.replace("_", " ").title()}', 
+                                           color='#00CC96', fontweight='bold')
+                                
+                                # Set x-axis labels
+                                if len(display_df) <= 10:
+                                    ax.set_xticks(range(len(display_df)))
+                                    ax.set_xticklabels(display_df['Range/Value'], rotation=45, ha='right')
+                                else:
+                                    ax.set_xticks([])
+                                
+                                # Grid and styling
+                                ax.grid(color='#2D3748', linestyle='--', linewidth=0.5, alpha=0.5)
+                                ax.spines['top'].set_visible(False)
+                                ax.spines['right'].set_visible(False)
+                                ax.spines['left'].set_color('#2D3748')
+                                ax.spines['bottom'].set_color('#2D3748')
+                                
+                                st.pyplot(fig, width="stretch")
+                else:
+                    st.info("No frequency distribution data available")
+                    
+            except Exception as freq_error:
+                st.warning(f"⚠️ Frequency analysis unavailable: {str(freq_error)}")
+            
         except Exception as e:
             st.error(f"⚠️ Error: {str(e)}")
 
@@ -729,20 +845,20 @@ with tab2:
                         if "CO2_kg" not in df_processed.columns:
                              df_processed["CO2_kg"] = df_processed["Total_Charcoal_kg"] * optimal_factor
 
-                    # Standard model fitting
-                    a, b, model = fit_consumption_model(df_processed)
+                    # Polynomial model fitting
+                    coefficients, intercept, model = fit_consumption_model(df_processed)
                     r2 = model.score(df_processed["Week"].values.reshape(-1, 1), df_processed["Total_Charcoal_kg"])
                     
                     predictions = model.predict(df_processed["Week"].values.reshape(-1, 1))
                     df_processed['Predicted_Charcoal'] = predictions
                     df_processed['Prediction_Error'] = df_processed['Total_Charcoal_kg'] - predictions
 
-                    emissions_1yr = total_emissions(52, a, b, optimal_factor)
-                    emissions_2yr = total_emissions(104, a, b, optimal_factor)
-                    emissions_5yr = total_emissions(260, a, b, optimal_factor)
+                    emissions_1yr = total_emissions(52, coefficients, intercept, optimal_factor)
+                    emissions_2yr = total_emissions(104, coefficients, intercept, optimal_factor)
+                    emissions_5yr = total_emissions(260, coefficients, intercept, optimal_factor)
 
                     # 🆕 SAVE ALL TABLES + LISTS - JSON SAFE
-                    ai_brain.save_full_dataset(df_raw, df_processed, a, b, r2, predictions, optimal_factor, is_ground_truth=is_ground_truth)
+                    ai_brain.save_full_dataset(df_raw, df_processed, coefficients, intercept, r2, predictions, optimal_factor, is_ground_truth=is_ground_truth)
                     
                     st.success(f"""
                         🎓 **AI FULLY TRAINED!** 
@@ -772,7 +888,7 @@ with tab2:
                         
                         max_weeks = 260
                         weeks_long = np.linspace(0, max_weeks, 200)
-                        cum_long = np.array([total_emissions(t, a, b, optimal_factor) for t in weeks_long])
+                        cum_long = np.array([total_emissions(t, coefficients, intercept, optimal_factor) for t in weeks_long])
                         
                         # Plot Line with Neon Glow effect
                         ax.plot(weeks_long/52, cum_long/1000, linewidth=3, color='#00CC96', label='Cumulative CO₂')
@@ -781,7 +897,7 @@ with tab2:
                         # Milestones
                         years = [1, 2, 3, 4, 5]
                         for year in years:
-                            emissions_tons = total_emissions(year*52, a, b, optimal_factor) / 1000
+                            emissions_tons = total_emissions(year*52, coefficients, intercept, optimal_factor) / 1000
                             # Vertical dashed lines
                             ax.axvline(x=year, linestyle=':', alpha=0.5, linewidth=1, color='gray')
                             # Points
