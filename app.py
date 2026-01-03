@@ -996,6 +996,74 @@ with tab2:
                     st.subheader("📊 All Data Results")
                     st.dataframe(df_processed[['Week', 'Total_Charcoal_kg', 'Predicted_Charcoal', 'Prediction_Error', 'CO2_kg']].round(2))
 
+                    # 🆕 WEEKLY CONSUMPTION PREDICTION
+                    st.subheader("📅 Weekly Consumption Prediction")
+                    
+                    # Generate weekly predictions for next 12 weeks
+                    future_weeks = np.arange(len(df_processed) + 1, len(df_processed) + 13)
+                    weekly_predictions = model.predict(future_weeks.reshape(-1, 1))
+                    
+                    # Create weekly prediction dataframe
+                    weekly_df = pd.DataFrame({
+                        'Future Week': future_weeks,
+                        'Predicted_Charcoal_kg': weekly_predictions,
+                        'Predicted_CO2_kg': weekly_predictions * optimal_factor
+                    })
+                    
+                    # Add weekly statistics
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        avg_weekly = weekly_predictions.mean()
+                        st.metric("Avg Weekly", f"{avg_weekly:.2f} kg")
+                    with col2:
+                        max_weekly = weekly_predictions.max()
+                        st.metric("Peak Week", f"{max_weekly:.2f} kg")
+                    with col3:
+                        total_12wk = weekly_predictions.sum()
+                        st.metric("12-Week Total", f"{total_12wk:.1f} kg")
+                    with col4:
+                        total_co2_12wk = (weekly_predictions * optimal_factor).sum()
+                        st.metric("12-Week CO₂", f"{total_co2_12wk:.1f} kg")
+                    
+                    # Display weekly predictions table
+                    st.dataframe(weekly_df.round(2), width='stretch')
+                    
+                    # Weekly prediction chart
+                    with plt.style.context("dark_background"):
+                        fig, ax = plt.subplots(figsize=(12, 6))
+                        fig.patch.set_facecolor('#0E1117')
+                        ax.patch.set_facecolor('#0E1117')
+                        
+                        # Plot historical data
+                        ax.plot(df_processed['Week'], df_processed['Total_Charcoal_kg'], 
+                               'o-', color='#00CC96', label='Historical', linewidth=2, markersize=6)
+                        
+                        # Plot predictions
+                        ax.plot(df_processed['Week'], df_processed['Predicted_Charcoal'], 
+                               '--', color='#FFA500', label='Model Fit', linewidth=2, alpha=0.7)
+                        
+                        # Plot future predictions
+                        ax.plot(weekly_df['Future Week'], weekly_df['Predicted_Charcoal_kg'], 
+                               'o--', color='#FF6B6B', label='Weekly Prediction', linewidth=2, markersize=8)
+                        
+                        # Add vertical line separating historical from prediction
+                        ax.axvline(x=len(df_processed) + 0.5, color='gray', linestyle=':', alpha=0.7, linewidth=2)
+                        ax.text(len(df_processed) + 0.5, ax.get_ylim()[1] * 0.9, 'Prediction Start', 
+                               rotation=90, va='top', ha='right', color='gray', fontsize=10)
+                        
+                        # Styling
+                        ax.set_xlabel("Week Number", color='gray')
+                        ax.set_ylabel("Charcoal Consumption (kg)", color='gray')
+                        ax.set_title("Weekly Charcoal Consumption Prediction", color='#00CC96', fontweight='bold', fontsize=14)
+                        ax.legend(loc='upper left', frameon=True, fancybox=True, shadow=True)
+                        ax.grid(color='#2D3748', linestyle='--', linewidth=0.5, alpha=0.5)
+                        ax.spines['top'].set_visible(False)
+                        ax.spines['right'].set_visible(False)
+                        ax.spines['left'].set_color('#2D3748')
+                        ax.spines['bottom'].set_color('#2D3748')
+                        
+                        st.pyplot(fig, width="stretch")
+
                     st.subheader("🌍 5-Year CO₂ Forecast")
                     
                     with plt.style.context("dark_background"):
