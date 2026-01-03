@@ -428,4 +428,5 @@ with tab2:
         st.info("👆 **Upload → AI saves ALL table data + learns optimal CO₂ factor**")
 
 st.markdown("---")
-st.markdown("<p style='text-align:center;'>🧠 Saves Full Tables • All Rows • Complete Predictions</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center;'>🧠 Saves Full Tables • All Rows 📚 • Complete Predictions</p>", unsafe_allow_html=True)
+
