@@ -223,14 +223,50 @@ with tab1:
                             colors = plt.cm.Set3(np.linspace(0, 1, len(value_counts)))
                             ax.pie(value_counts.values, labels=value_counts.index, 
                                    autopct='%1.1f%%', startangle=90, colors=colors)
-                            ax.set_title(f"📊 {col_name}", fontweight='bold')
+                            ax.set_title(f" {col_name}", fontweight='bold')
                             st.pyplot(fig)
             
+            # FREQUENCY DISTRIBUTION GRAPHS FOR NUMERIC COLUMNS
+            st.subheader(" **Frequency Distribution Analysis**")
+            numeric_cols = df_raw.select_dtypes(include=[np.number]).columns.tolist()
+            
+            if numeric_cols:
+                for col_name in numeric_cols:
+                    with st.container():
+                        col1, col2 = st.columns([1, 4])
+                        with col1:
+                            st.write(f"**{col_name}**")
+                            st.write(f"Mean: {df_raw[col_name].mean():.2f}")
+                            st.write(f"Std: {df_raw[col_name].std():.2f}")
+                            st.write(f"Min: {df_raw[col_name].min():.2f}")
+                            st.write(f"Max: {df_raw[col_name].max():.2f}")
+                        
+                        with col2:
+                            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+                            
+                            # Histogram
+                            ax1.hist(df_raw[col_name].dropna(), bins=20, alpha=0.7, color='skyblue', edgecolor='black')
+                            ax1.set_title(f' {col_name} - Histogram')
+                            ax1.set_xlabel('Value')
+                            ax1.set_ylabel('Frequency')
+                            ax1.grid(True, alpha=0.3)
+                            
+                            # Box plot
+                            ax2.boxplot(df_raw[col_name].dropna())
+                            ax2.set_title(f' {col_name} - Box Plot')
+                            ax2.set_ylabel('Value')
+                            ax2.grid(True, alpha=0.3)
+                            
+                            plt.tight_layout()
+                            st.pyplot(fig)
+            else:
+                st.info(" No numeric columns found for frequency distribution analysis.")
+            
         except Exception as e:
-            st.error(f"⚠️ Error: {str(e)}")
+            st.error(f" Error: {str(e)}")
 
 with tab2:
-    st.subheader("📁 Upload Excel File")
+    st.subheader(" Upload Excel File")
     uploaded_file2 = st.file_uploader("Choose Excel (.xlsx)", type=["xlsx"], key="predict")
 
     if uploaded_file2:
